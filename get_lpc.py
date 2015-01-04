@@ -17,6 +17,12 @@ import itertools
 import wave
 import signal
 import multiprocessing
+
+import matplotlib
+matplotlib.use('tkagg')
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
 from sys import byteorder
 from struct import pack
 from multiprocessing.managers import SyncManager
@@ -244,43 +250,62 @@ def mgr_init():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     
 
+
 if __name__ == '__main__':
-    #print("please speak a word into the microphone")
-    #record_to_file('demo.wav')
-    #print("done - result written to demo.wav")
-    #print get_formants(sys.argv[1])
-    # start audio input thread
+    # set up animation
+    fig = plt.figure(figsize=(8, 8))
+    ax = plt.subplot(111)
+    ax.set_ylim(0, 1000)
+    ax.set_xlim(700,2000)
+    vowel_point = ax.plot(1200, 500, 'ro')
+    f1 = 500
+    f2 = 200
+    formants_list = []
+#    plt.show()
+
+    # some multiprocessing setup
     thread_manager = SyncManager()
     thread_manager.start(mgr_init)
     audio_queue = thread_manager.Queue()
-    audio_input = multiprocessing.Process(target=get_audio, args=(audio_queue, ))
-    audio_input.start()
-    formants_list = []
-    try:
-        while 1:
-            sw, snd_data = audio_queue.get()
-            # get formants
-            if is_silent(snd_data) != True:
-                formants = get_formants(snd_data, RATE)
-                formants_list.extend(formants)
-                
-                if len(formants_list) > 10:
-                    formants = zip ( formants_list )
-                    formants = numpy.mean(formants, axis = 1)
-                    formants_list = []
-                    
-                    if len(formants) >= 3:
-                        print "F1: {f1:10.3f}\tF2: {f2:10.3f}\tF3: {f3:10.3f}".format(f1=formants[0], f2=formants[1], f3=formants[2])
-            else:
-                formants_list=[]
-
-    except KeyboardInterrupt:
-        # wait for children to shutdown
-        while audio_input.exitcode == None:
-            time.sleep(0.1)
-    finally:
-        thread_manager.shutdown()
+    
+    def vowel_update(framedata):
+        sw, snd_data = audio_queue.get()
+        # get formants
+        if is_silent(snd_data) != True:
+            formants = get_formants(snd_data, RATE)
+            print "F1: {f1:10.3f}\tF2: {f2:10.3f}\tF3: {f3:10.3f}".format(f1=formants[0], f2=formants[1], f3=formants[2])
+            formants_list.extend(formants)
         
+            if len(formants_list) > 10:
+                formants = zip ( formants_list )
+                formants = numpy.mean(formants, axis = 1)
+                formants_list = []
+            
+                if len(formants) >= 3:
+                    vowel_point.set_xdata(formants[1])
+                    vowel_point.set_ydata(formants[0])
+        else:
+            formants_list=[]
+        return vowel_point,
+
+    print "Starting..."
+    ani = animation.FuncAnimation(fig, vowel_update, blit=False, repeat=True)
+    print "No reallly..."
+    
+    # start audio input thread
+    audio_input = multiprocessing.Process(target=get_audio, args=(audio_queue, ))
+    audio_input.daemon=True
+    audio_input.start()
+    try:
+        plt.show()
+
+    finally:
+        # wait for children to shutdown
+        while audio_input.exitcode== None:
+            time.sleep(0.1)
+        print >> sys.stderr, "Shutting down..."
+        thread_manager.shutdown()
+
         
     
     
