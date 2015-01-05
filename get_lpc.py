@@ -11,32 +11,32 @@ As well as from an answer to: http://stackoverflow.com/questions/892199/detect-r
 
 import sys
 import time
+import numpy as np
 import wave
 import math
 import itertools
+import pyaudio
 import wave
 import signal
+import Queue
 import multiprocessing
 
 import matplotlib
-matplotlib.use('tkagg')
+#matplotlib.use('tkagg')
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 from sys import byteorder
 from struct import pack
 from multiprocessing.managers import SyncManager
-
-import numpy
-import pyaudio
 from scipy.signal import lfilter, hamming, resample
 from scikits.talkbox import lpc
 
 THRESHOLD = 500
 CHUNK_SIZE = 2048
 FORMAT = pyaudio.paInt16
-NPFORMAT = numpy.int16
-RATE = 44100
+NPFORMAT = np.int16
+RATE = 48000
 
 def wav_as_numpy(file_path):
     # Read from file.
@@ -44,7 +44,7 @@ def wav_as_numpy(file_path):
 
     # Get file as numpy array.
     x = spf.readframes(-1)
-    x = numpy.fromstring(x, 'Int16')
+    x = np.fromstring(x, 'Int16')
     
     return x
 
@@ -56,7 +56,7 @@ def get_formants(x, Fs):
     
     # Get Hamming window.
     N = len(x)
-    w = numpy.hamming(N)
+    w = np.hamming(N)
 
     # Apply window and high pass (pre-emphasis) filter.
     x1 = x * w
@@ -64,7 +64,7 @@ def get_formants(x, Fs):
     
     # Resample to make estimates better??
     new_Fs = 22050
-    new_N = numpy.floor((float(N) * float(new_Fs))/Fs)
+    new_N = np.floor((float(N) * float(new_Fs))/Fs)
     #print new_N
     x1 = resample(x1, new_N, window=None)
     Fs = int(new_Fs)
@@ -75,19 +75,19 @@ def get_formants(x, Fs):
 
     try:
         # Get roots.
-        rts = numpy.roots(A)
-        rts = [r for r in rts if numpy.imag(r) >= 0]
+        rts = np.roots(A)
+        rts = [r for r in rts if np.imag(r) >= 0]
 
         # Get angles.
-        angz = numpy.arctan2(numpy.imag(rts), numpy.real(rts))
+        angz = np.arctan2(np.imag(rts), np.real(rts))
 
         # Get frequencies.
         frqs = angz * (Fs / (2 * math.pi))
-        frq_indices = numpy.argsort(frqs)
+        frq_indices = np.argsort(frqs)
         frqs = [frqs[i] for i in frq_indices]
-        bws = [-1/2*(Fs/(2*numpy.pi))*numpy.log(numpy.abs(rts[i])) for i in frq_indices]
+        bws = [-1/2*(Fs/(2*np.pi))*np.log(np.abs(rts[i])) for i in frq_indices]
         frqs = [freq for freq, bw in itertools.izip(frqs, bws) if freq > 90 and bw < 400]
-    except numpy.linalg.LinAlgError:
+    except np.linalg.LinAlgError:
         frqs = []
 
     return frqs
@@ -101,24 +101,24 @@ def normalize(snd_data):
     MAXIMUM = 16384
     times = float(MAXIMUM)/max(abs(i) for i in snd_data)
 
-    r = numpy.empty([0], dtype=NPFORMAT)
+    r = np.empty([0], dtype=NPFORMAT)
     for i in snd_data:
-        r = numpy.append(r, int(i*times))
+        r = np.append(r, int(i*times))
     return r
 
 def trim(snd_data):
     "Trim the blank spots at the start and end"
     def _trim(snd_data):
         snd_started = False
-        r = numpy.empty([0], dtype=NPFORMAT)
+        r = np.empty([0], dtype=NPFORMAT)
 
         for i in snd_data:
             if not snd_started and abs(i)>THRESHOLD:
                 snd_started = True
-                r = numpy.append(r, i)
+                r = np.append(r, i)
 
             elif snd_started:
-                r = numpy.append(r, i)
+                r = np.append(r, i)
         return r
 
     # Trim to the left
@@ -133,9 +133,9 @@ def trim(snd_data):
 def add_silence(snd_data, seconds):
     "Add silence to the start and end of 'snd_data' of length 'seconds' (float)"
     assert seconds != 0
-    r = numpy.array([0 for i in xrange(int(seconds*RATE))], dtype=NPFORMAT)
-    r = numpy.append(r, snd_data)
-    r = numpy.append(r, [0 for i in xrange(int(seconds*RATE))])
+    r = np.array([0 for i in xrange(int(seconds*RATE))], dtype=NPFORMAT)
+    r = np.append(r, snd_data)
+    r = np.append(r, [0 for i in xrange(int(seconds*RATE))])
     return r
 
 
@@ -157,7 +157,7 @@ def record():
     num_silent = 0
     snd_started = False
 
-    r = numpy.empty([0], dtype=NPFORMAT)
+    r = np.empty([0], dtype=NPFORMAT)
 
 
     while 1:
@@ -167,13 +167,13 @@ def record():
     
         #print "Data: \"%s\"" % new_data
         try:
-            snd_data = numpy.array(numpy.fromstring(new_data,dtype=numpy.int16),dtype=NPFORMAT)
+            snd_data = np.array(np.fromstring(new_data,dtype=np.int16),dtype=NPFORMAT)
         except ValueError as e:
-            snd_data = numpy.array([0],dtype=NPFORMAT)
+            snd_data = np.array([0],dtype=NPFORMAT)
     
         if byteorder == 'big':
             snd_data = snd_data.byteswap()
-        r = numpy.append(r, snd_data)
+        r = np.append(r, snd_data)
 
         silent = is_silent(snd_data)
 
@@ -209,7 +209,7 @@ def record_to_file(path):
     wf.writeframes(data)
     wf.close()
 
-def get_audio(q):
+def get_audio(q, exit_event):
     """
     Infinite loop streaming audio from microphone. Puts audio data to a
     queue, q. Be careful that q is shareable across threads, see:
@@ -221,17 +221,17 @@ def get_audio(q):
     stream = p.open(format=FORMAT, channels=1, rate=RATE,
         input=True, output=False,
         frames_per_buffer=CHUNK_SIZE)
-    keep_looping = True
-    
+    #keep_looping = True
+
     try:
-        while keep_looping:
+        while exit_event.is_set() != True:
             # little endian, signed short
             new_data = stream.read(CHUNK_SIZE)
 
             try:
-                snd_data = numpy.array(numpy.fromstring(new_data,dtype=numpy.int16),dtype=NPFORMAT)
+                snd_data = np.array(np.fromstring(new_data,dtype=np.int16),dtype=NPFORMAT)
             except ValueError as e:
-                snd_data = numpy.array([0],dtype=NPFORMAT)
+                snd_data = np.array([0],dtype=NPFORMAT)
         
             if byteorder == 'big':
                 snd_data = snd_data.byteswap()
@@ -243,68 +243,83 @@ def get_audio(q):
     finally:
         stream.close()
         p.terminate()
-        print >> sys.stderr, "Cleaned up get_audio objects..."
+        print "Cleaned up get_audio objects..."
 
 
 def mgr_init():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     
-
-
-if __name__ == '__main__':
+ 
+def do_gui(q):
     # set up animation
     fig = plt.figure(figsize=(8, 8))
     ax = plt.subplot(111)
-    ax.set_ylim(0, 1000)
-    ax.set_xlim(700,2000)
-    vowel_point = ax.plot(1200, 500, 'ro')
-    f1 = 500
-    f2 = 200
-    formants_list = []
-#    plt.show()
+    ax.set_ylim(0, 1500)
+    ax.set_xlim(700,3000)
+    plt.gca().invert_xaxis()
+    plt.gca().invert_yaxis()
 
+    f1 = 700
+    f2 = 1500
+    vowel_point = ax.plot(f2, f1, 'ro')
+        
+    def vowel_update(framedata):
+        formants = [vowel_point[0].get_ydata(), vowel_point[0].get_xdata()]
+        try:
+            sw, snd_data = q.get(block=False)
+            if is_silent(snd_data) != True:
+                formants = get_formants(snd_data, RATE)
+                if len(formants) < 2 or any(np.isnan(formants)):
+                    formants = [vowel_point[0].get_ydata(), vowel_point[0].get_xdata()]
+        except Queue.Empty:
+            pass
+        
+        xdelta = formants[1] - vowel_point[0].get_xdata()
+        ydelta = formants[0] - vowel_point[0].get_ydata()
+
+        # not doing anything with this yet
+        norm = np.linalg.norm(np.array([xdelta, ydelta]))
+        
+        maxvel = 50
+        if not np.isnan(norm) and norm != 0 and norm > maxvel:
+            print "xd {}  yd {} norm {}".format(xdelta, ydelta, norm)
+            xdelta = (xdelta / norm) * maxvel
+            ydelta = (ydelta / norm) * maxvel
+        
+        vowel_point[0].set_xdata(vowel_point[0].get_xdata() + xdelta)
+        vowel_point[0].set_ydata(vowel_point[0].get_ydata() + ydelta)
+        return (vowel_point,)
+
+    ani = animation.FuncAnimation(fig, vowel_update, blit=False, repeat=True, interval=10)
+    plt.show()
+
+
+if __name__ == '__main__':
     # some multiprocessing setup
     thread_manager = SyncManager()
     thread_manager.start(mgr_init)
+    exit_event = thread_manager.Event()
     audio_queue = thread_manager.Queue()
-    
-    def vowel_update(framedata):
-        sw, snd_data = audio_queue.get()
-        # get formants
-        if is_silent(snd_data) != True:
-            formants = get_formants(snd_data, RATE)
-            print "F1: {f1:10.3f}\tF2: {f2:10.3f}\tF3: {f3:10.3f}".format(f1=formants[0], f2=formants[1], f3=formants[2])
-            formants_list.extend(formants)
-        
-            if len(formants_list) > 10:
-                formants = zip ( formants_list )
-                formants = numpy.mean(formants, axis = 1)
-                formants_list = []
-            
-                if len(formants) >= 3:
-                    vowel_point.set_xdata(formants[1])
-                    vowel_point.set_ydata(formants[0])
-        else:
-            formants_list=[]
-        return vowel_point,
 
-    print "Starting..."
-    ani = animation.FuncAnimation(fig, vowel_update, blit=False, repeat=True)
-    print "No reallly..."
-    
     # start audio input thread
-    audio_input = multiprocessing.Process(target=get_audio, args=(audio_queue, ))
+    audio_input = multiprocessing.Process(target=get_audio, args=(audio_queue, exit_event))
     audio_input.daemon=True
     audio_input.start()
-    try:
-        plt.show()
+    
+    gui_process = multiprocessing.Process(target=do_gui, args=(audio_queue,))
+    gui_process.daemon = True
+    gui_process.start()
+    
+    while gui_process.exitcode == None:
+        time.sleep(0.1)
 
-    finally:
-        # wait for children to shutdown
-        while audio_input.exitcode== None:
-            time.sleep(0.1)
-        print >> sys.stderr, "Shutting down..."
-        thread_manager.shutdown()
+    exit_event.set()
+    while audio_input.exitcode == None:
+        time.sleep(0.1) 
+    
+    thread_manager.shutdown()
+    print "Bye."
+
 
         
     
