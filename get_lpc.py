@@ -36,7 +36,7 @@ THRESHOLD = 500
 CHUNK_SIZE = 2048
 FORMAT = pyaudio.paInt16
 NPFORMAT = np.int16
-RATE = 48000
+RATE = 44100
 
 def wav_as_numpy(file_path):
     # Read from file.
