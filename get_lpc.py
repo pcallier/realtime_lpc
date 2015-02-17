@@ -11,18 +11,18 @@ As well as from an answer to: http://stackoverflow.com/questions/892199/detect-r
 
 import sys
 import time
-import numpy
 import wave
 import math
-import pyaudio
 import itertools
-import pyaudio
 import wave
 import signal
 import multiprocessing
 from sys import byteorder
 from struct import pack
 from multiprocessing.managers import SyncManager
+
+import numpy
+import pyaudio
 from scipy.signal import lfilter, hamming, resample
 from scikits.talkbox import lpc
 
@@ -30,7 +30,7 @@ THRESHOLD = 500
 CHUNK_SIZE = 2048
 FORMAT = pyaudio.paInt16
 NPFORMAT = numpy.int16
-RATE = 48000
+RATE = 44100
 
 def wav_as_numpy(file_path):
     # Read from file.
@@ -258,7 +258,6 @@ if __name__ == '__main__':
     formants_list = []
     try:
         while 1:
-            #print "lkdsflkajdf"
             sw, snd_data = audio_queue.get()
             # get formants
             if is_silent(snd_data) != True:
